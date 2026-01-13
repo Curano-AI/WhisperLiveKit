@@ -69,6 +69,27 @@
         <p id="status"></p>
     </div>
 
+    <div id="langDetectionPanel" class="lang-detection-panel" style="display: none;">
+        <div class="lang-panel-header">
+            <span class="lang-panel-title">Language Detection</span>
+            <span id="langPanelSelected" class="lang-panel-selected"></span>
+        </div>
+        <div class="lang-panel-details">
+            <div class="lang-panel-confidence">
+                <span class="label">Confidence:</span>
+                <div class="lang-panel-confidence-bar">
+                    <div id="langPanelConfidenceFill" class="confidence-fill"></div>
+                </div>
+                <span id="langPanelConfidenceValue" class="value"></span>
+            </div>
+            <div class="lang-panel-meta">
+                <span id="langPanelReason" class="lang-panel-reason"></span>
+                <span id="langPanelGap" class="lang-panel-gap"></span>
+            </div>
+        </div>
+        <div id="langPanelCandidates" class="lang-panel-candidates"></div>
+    </div>
+
     <div class="transcript-container">
         <div id="linesTranscript"></div>
     </div>

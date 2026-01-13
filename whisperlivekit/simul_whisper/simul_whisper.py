@@ -823,9 +823,9 @@ class AlignAtt:
                 current_timestamp = l_absolute_timestamps[-1] if l_absolute_timestamps else 0.0
             timestamp_idx += len(word_tokens)
 
-            # Get lang_detection_info only for the first token (to avoid redundant data)
+            # Get lang_detection_info for all tokens (so it's available in any segment)
             lang_info = None
-            if len(timestamped_words) == 0 and self.state.lang_decision_result is not None:
+            if self.state.lang_decision_result is not None:
                 lang_info = self.state.lang_decision_result.to_dict()
 
             timestamp_entry = ASRToken(
