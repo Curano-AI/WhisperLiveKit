@@ -12,6 +12,7 @@ class DecoderState:
     detected_language: Optional[str] = None
     reset_tokenizer_to_auto_next_call: bool = False
     lang_id_predictions: List[Tuple[str, float]] = field(default_factory=list)
+    lang_decision_result: Optional[Any] = None  # LangDecisionResult from lang_detection.py
     
     tokens: List[torch.Tensor] = field(default_factory=list)
     initial_tokens: Optional[torch.Tensor] = None
@@ -59,7 +60,6 @@ class DecoderState:
         self.kv_cache.clear()
 
         # Force GPU cache cleanup (only if CUDA is available)
-        import torch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -84,7 +84,7 @@ class DecoderState:
     def full_reset(self, rewind_threshold: int = 200):
         """
         Full reset including audio segments and tokens.
-        
+
         Args:
             rewind_threshold: Value for resetting last_attend_frame
         """
@@ -93,4 +93,3 @@ class DecoderState:
         self.tokens = []
         self.kv_cache = {}
         self.first_timestamp = None
-

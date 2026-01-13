@@ -18,6 +18,7 @@ class TimedText(Timed):
     text: Optional[str] = ''
     speaker: Optional[int] = -1
     detected_language: Optional[str] = None
+    lang_detection_info: Optional[Dict[str, Any]] = None  # Detailed language detection metadata
     
     def has_punctuation(self) -> bool:
         return any(char in PUNCTUATION_MARKS for char in self.text.strip())
@@ -39,10 +40,17 @@ class TimedText(Timed):
 
 @dataclass()
 class ASRToken(TimedText):
-    
+
     def with_offset(self, offset: float) -> "ASRToken":
         """Return a new token with the time offset added."""
-        return ASRToken(self.start + offset, self.end + offset, self.text, self.speaker, detected_language=self.detected_language)
+        return ASRToken(
+            self.start + offset,
+            self.end + offset,
+            self.text,
+            self.speaker,
+            detected_language=self.detected_language,
+            lang_detection_info=self.lang_detection_info,
+        )
 
     def is_silence(self) -> bool:
         return False
@@ -142,7 +150,8 @@ class Segment(TimedText):
                 end=end_token.end,
                 text=''.join(token.text for token in tokens),
                 speaker=-1,
-                detected_language=start_token.detected_language
+                detected_language=start_token.detected_language,
+                lang_detection_info=start_token.lang_detection_info,
             )
 
     def is_silence(self) -> bool:
@@ -161,6 +170,8 @@ class Segment(TimedText):
             _dict['translation'] = self.translation
         if self.detected_language:
             _dict['detected_language'] = self.detected_language
+        if self.lang_detection_info:
+            _dict['lang_detection_info'] = self.lang_detection_info
         return _dict
 
 
@@ -226,4 +237,4 @@ class State():
     new_translation: List[Any] = field(default_factory=list)
     new_diarization: List[Any] = field(default_factory=list)
     new_tokens_buffer: List[Any] = field(default_factory=list)  # only when local agreement
-    new_translation_buffer= TimedText()
+    new_translation_buffer: TimedText = field(default_factory=TimedText)

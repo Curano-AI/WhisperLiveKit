@@ -3,9 +3,9 @@ from typing import Literal
 
 
 @dataclass
-class AlignAttConfig():
+class AlignAttConfig:
     eval_data_path: str = "tmp"
-    segment_length: float = field(default=1.0, metadata = {"help": "in second"})
+    segment_length: float = field(default=1.0, metadata={"help": "in second"})
     frame_threshold: int = 4
     rewind_threshold: int = 200
     audio_max_len: float = 20.0
@@ -27,4 +27,7 @@ class AlignAttConfig():
     lang_id_dynamic_threshold: bool = True
     lang_id_fallback_lang: str = "en"
     lang_id_min_consensus_ratio: float = 0.5
-    
+    # Gap analysis parameters (new soft voting algorithm)
+    lang_id_min_gap_threshold: float = 0.05      # Minimum 5% gap required
+    lang_id_ambiguity_threshold: float = 0.10   # Mark as ambiguous if gap < 10%
+    lang_id_use_soft_voting: bool = True        # Use new soft voting algorithm
