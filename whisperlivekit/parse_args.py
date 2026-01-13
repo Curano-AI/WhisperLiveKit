@@ -317,6 +317,39 @@ def parse_args():
         help="600M or 1.3B",
     )
 
+    # Language identification arguments
+    simulstreaming_group.add_argument(
+        "--lang-id-confidence-threshold",
+        type=float,
+        default=0.5,
+        dest="lang_id_confidence_threshold",
+        help="Confidence threshold for language detection (0.0-1.0). Default: 0.5.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-ensemble-chunks",
+        type=int,
+        default=3,
+        dest="lang_id_ensemble_chunks",
+        help="Number of audio chunks to use for ensemble voting in language detection. Default: 3.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-dynamic-threshold",
+        action="store_true",
+        default=True,
+        dest="lang_id_dynamic_threshold",
+        help="Enable dynamic confidence threshold based on audio clarity.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-fallback-lang",
+        type=str,
+        default="en",
+        dest="lang_id_fallback_lang",
+        help="Fallback language if confidence threshold is not met. Default: 'en'.",
+    )
+
     args = parser.parse_args()
     
     args.transcription = not args.no_transcription

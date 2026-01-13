@@ -11,6 +11,7 @@ class DecoderState:
     tokenizer: Any = None
     detected_language: Optional[str] = None
     reset_tokenizer_to_auto_next_call: bool = False
+    lang_id_predictions: List[Tuple[str, float]] = field(default_factory=list)
     
     tokens: List[torch.Tensor] = field(default_factory=list)
     initial_tokens: Optional[torch.Tensor] = None

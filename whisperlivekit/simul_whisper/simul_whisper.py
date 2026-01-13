@@ -380,6 +380,57 @@ class AlignAtt:
         self._clean_cache()
         return language_tokens, language_probs
 
+    def _ensemble_language_vote(self) -> tuple:
+        """Weighted voting over accumulated language predictions."""
+        votes: dict = {}
+        counts: dict = {}
+
+        for lang, prob in self.state.lang_id_predictions:
+            weight = prob ** 2.0  # Quadratic weighting
+            votes[lang] = votes.get(lang, 0) + weight
+            counts[lang] = counts.get(lang, 0) + 1
+
+        if not votes:
+            return None, 0.0
+
+        best_lang = max(votes, key=votes.get)
+        mean_prob = sum(p for l, p in self.state.lang_id_predictions if l == best_lang) / counts[best_lang]
+
+        return best_lang, mean_prob
+
+    def _get_dynamic_threshold(self) -> float:
+        """Adaptive threshold based on prediction distribution."""
+        probs = [p for _, p in self.state.lang_id_predictions]
+        if not probs:
+            return self.cfg.lang_id_confidence_threshold
+
+        mean_prob = sum(probs) / len(probs)
+        max_prob = max(probs)
+        min_prob = min(probs)
+
+        # High variance -> more conservative
+        if max_prob - min_prob > 0.4:
+            sorted_probs = sorted(probs)
+            return max(0.3, sorted_probs[len(sorted_probs) // 4])
+
+        # Low confidence -> more liberal
+        if mean_prob < 0.5:
+            return self.cfg.lang_id_confidence_threshold * 0.7
+
+        return self.cfg.lang_id_confidence_threshold
+
+    def _apply_detected_language(self, lang: str, prob: float):
+        """Apply the detected language."""
+        print(f"Detected language: {lang} with p={prob:.4f}")
+        self.create_tokenizer(lang)
+        self.state.last_attend_frame = -self.cfg.rewind_threshold
+        self.state.cumulative_time_offset = 0.0
+        self.init_tokens()
+        self.init_context()
+        self.state.detected_language = lang
+        self.state.lang_id_predictions.clear()
+        logger.info(f"Tokenizer language: {self.tokenizer.language}, {self.tokenizer.sot_sequence_including_notimestamps}")
+
     ### transcription / translation
 
     @torch.no_grad()
@@ -454,16 +505,30 @@ class AlignAtt:
         if self.cfg.language == "auto" and self.state.detected_language is None and self.state.first_timestamp:
             seconds_since_start = self.segments_len() - self.state.first_timestamp
             if seconds_since_start >= 2.0:
-                language_tokens, language_probs = self.lang_id(encoder_feature) 
-                top_lan, p = max(language_probs[0].items(), key=lambda x: x[1])
-                print(f"Detected language: {top_lan} with p={p:.4f}")
-                self.create_tokenizer(top_lan)
-                self.state.last_attend_frame = -self.cfg.rewind_threshold
-                self.state.cumulative_time_offset = 0.0
-                self.init_tokens()
-                self.init_context()
-                self.state.detected_language = top_lan
-                logger.info(f"Tokenizer language: {self.tokenizer.language}, {self.tokenizer.sot_sequence_including_notimestamps}")
+                language_tokens, language_probs = self.lang_id(encoder_feature)
+                top_lan, prob = max(language_probs[0].items(), key=lambda x: x[1])
+
+                # Accumulate predictions for ensemble voting
+                self.state.lang_id_predictions.append((top_lan, prob))
+                logger.debug(f"Language prediction {len(self.state.lang_id_predictions)}/{self.cfg.lang_id_ensemble_chunks}: {top_lan} p={prob:.4f}")
+
+                # Check if we have enough chunks for decision
+                if len(self.state.lang_id_predictions) >= self.cfg.lang_id_ensemble_chunks:
+                    final_lang, final_prob = self._ensemble_language_vote()
+
+                    # Get threshold (dynamic or static)
+                    threshold = self._get_dynamic_threshold() if self.cfg.lang_id_dynamic_threshold else self.cfg.lang_id_confidence_threshold
+
+                    if final_prob >= threshold:
+                        self._apply_detected_language(final_lang, final_prob)
+                    else:
+                        # Fallback if confidence is too low
+                        if self.cfg.lang_id_fallback_lang != "auto":
+                            logger.warning(f"Low confidence {final_prob:.4f} < {threshold:.4f}, using fallback: {self.cfg.lang_id_fallback_lang}")
+                            self._apply_detected_language(self.cfg.lang_id_fallback_lang, final_prob)
+                        else:
+                            # Continue accumulating if fallback is "auto"
+                            logger.warning(f"Low confidence {final_prob:.4f} < {threshold:.4f}, continuing to accumulate")
 
         self.trim_context()
         current_tokens = self._current_tokens()

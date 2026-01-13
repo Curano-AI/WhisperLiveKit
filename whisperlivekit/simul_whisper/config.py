@@ -21,4 +21,9 @@ class AlignAttConfig():
     init_prompt: str = field(default=None)
     static_init_prompt: str = field(default=None)
     max_context_tokens: int = field(default=None)
+    # Language identification parameters
+    lang_id_confidence_threshold: float = 0.5
+    lang_id_ensemble_chunks: int = 3
+    lang_id_dynamic_threshold: bool = True
+    lang_id_fallback_lang: str = "en"
     

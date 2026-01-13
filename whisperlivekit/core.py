@@ -118,6 +118,11 @@ class TranscriptionEngine:
                     "init_prompt": None,
                     "static_init_prompt": None,
                     "max_context_tokens": None,
+                    # Language identification parameters
+                    "lang_id_confidence_threshold": 0.5,
+                    "lang_id_ensemble_chunks": 3,
+                    "lang_id_dynamic_threshold": True,
+                    "lang_id_fallback_lang": "en",
                 }
                 simulstreaming_params = update_with_kwargs(simulstreaming_params, kwargs)
                 
