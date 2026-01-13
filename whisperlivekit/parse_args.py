@@ -350,6 +350,14 @@ def parse_args():
         help="Fallback language if confidence threshold is not met. Default: 'en'.",
     )
 
+    simulstreaming_group.add_argument(
+        "--lang-id-min-consensus-ratio",
+        type=float,
+        default=0.5,
+        dest="lang_id_min_consensus_ratio",
+        help="Minimum ratio of chunks that must agree on the language. Default: 0.5 (50%%).",
+    )
+
     args = parser.parse_args()
     
     args.transcription = not args.no_transcription

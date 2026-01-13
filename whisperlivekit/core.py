@@ -123,6 +123,7 @@ class TranscriptionEngine:
                     "lang_id_ensemble_chunks": 3,
                     "lang_id_dynamic_threshold": True,
                     "lang_id_fallback_lang": "en",
+                    "lang_id_min_consensus_ratio": 0.5,
                 }
                 simulstreaming_params = update_with_kwargs(simulstreaming_params, kwargs)
                 

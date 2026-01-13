@@ -26,4 +26,5 @@ class AlignAttConfig():
     lang_id_ensemble_chunks: int = 3
     lang_id_dynamic_threshold: bool = True
     lang_id_fallback_lang: str = "en"
+    lang_id_min_consensus_ratio: float = 0.5
     

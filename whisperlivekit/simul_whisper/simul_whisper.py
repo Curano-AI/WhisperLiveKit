@@ -381,22 +381,45 @@ class AlignAtt:
         return language_tokens, language_probs
 
     def _ensemble_language_vote(self) -> tuple:
-        """Weighted voting over accumulated language predictions."""
+        """Weighted voting over accumulated language predictions.
+
+        Returns: (best_lang, mean_prob, votes_dict, weighted_scores_dict, consistency_score)
+        """
         votes: dict = {}
         counts: dict = {}
+        weighted_scores: dict = {}
+        prob_sums: dict = {}
 
-        for lang, prob in self.state.lang_id_predictions:
+        # Log all predictions
+        logger.info(f"[LangID] Ensemble voting over {len(self.state.lang_id_predictions)} predictions:")
+        for i, (lang, prob) in enumerate(self.state.lang_id_predictions):
+            logger.info(f"  [{i+1}] {lang}: {prob:.4f}")
             weight = prob ** 2.0  # Quadratic weighting
-            votes[lang] = votes.get(lang, 0) + weight
+            votes[lang] = votes.get(lang, 0) + 1
+            weighted_scores[lang] = weighted_scores.get(lang, 0) + weight
+            prob_sums[lang] = prob_sums.get(lang, 0) + prob
             counts[lang] = counts.get(lang, 0) + 1
 
         if not votes:
-            return None, 0.0
+            logger.warning("[LangID] No predictions to vote on")
+            return None, 0.0, {}, {}, 0.0
 
-        best_lang = max(votes, key=votes.get)
-        mean_prob = sum(p for l, p in self.state.lang_id_predictions if l == best_lang) / counts[best_lang]
+        # Log voting results
+        logger.info(f"[LangID] Vote counts: {votes}")
+        logger.info(f"[LangID] Weighted scores: {{{', '.join(f'{k}: {v:.4f}' for k, v in weighted_scores.items())}}}")
 
-        return best_lang, mean_prob
+        # Select best language by weighted score
+        best_lang = max(weighted_scores, key=weighted_scores.get)
+        mean_prob = prob_sums[best_lang] / counts[best_lang]
+
+        # Calculate consistency (what fraction voted for the winner)
+        total_votes = sum(votes.values())
+        consistency_score = votes[best_lang] / total_votes if total_votes > 0 else 0.0
+
+        logger.info(f"[LangID] Best candidate: {best_lang} (votes={votes[best_lang]}/{total_votes}, "
+                   f"mean_prob={mean_prob:.4f}, consistency={consistency_score:.2%})")
+
+        return best_lang, mean_prob, votes, weighted_scores, consistency_score
 
     def _get_dynamic_threshold(self) -> float:
         """Adaptive threshold based on prediction distribution."""
@@ -407,20 +430,27 @@ class AlignAtt:
         mean_prob = sum(probs) / len(probs)
         max_prob = max(probs)
         min_prob = min(probs)
+        variance = max_prob - min_prob
 
-        # High variance -> more conservative
-        if max_prob - min_prob > 0.4:
+        # High variance -> more conservative (use 25th percentile)
+        if variance > 0.4:
             sorted_probs = sorted(probs)
-            return max(0.3, sorted_probs[len(sorted_probs) // 4])
+            threshold = max(0.3, sorted_probs[len(sorted_probs) // 4])
+            logger.info(f"[LangID] Dynamic threshold: {threshold:.4f} (high variance={variance:.4f}, using p25)")
+            return threshold
 
         # Low confidence -> more liberal
         if mean_prob < 0.5:
-            return self.cfg.lang_id_confidence_threshold * 0.7
+            threshold = self.cfg.lang_id_confidence_threshold * 0.7
+            logger.info(f"[LangID] Dynamic threshold: {threshold:.4f} (low mean={mean_prob:.4f}, using 0.7x base)")
+            return threshold
 
+        logger.info(f"[LangID] Dynamic threshold: {self.cfg.lang_id_confidence_threshold:.4f} (using base threshold)")
         return self.cfg.lang_id_confidence_threshold
 
-    def _apply_detected_language(self, lang: str, prob: float):
+    def _apply_detected_language(self, lang: str, prob: float, reason: str = ""):
         """Apply the detected language."""
+        logger.info(f"[LangID] === DECISION: {lang} (confidence={prob:.4f}) {reason} ===")
         print(f"Detected language: {lang} with p={prob:.4f}")
         self.create_tokenizer(lang)
         self.state.last_attend_frame = -self.cfg.rewind_threshold
@@ -429,7 +459,7 @@ class AlignAtt:
         self.init_context()
         self.state.detected_language = lang
         self.state.lang_id_predictions.clear()
-        logger.info(f"Tokenizer language: {self.tokenizer.language}, {self.tokenizer.sot_sequence_including_notimestamps}")
+        logger.info(f"[LangID] Tokenizer configured: language={self.tokenizer.language}")
 
     ### transcription / translation
 
@@ -510,25 +540,38 @@ class AlignAtt:
 
                 # Accumulate predictions for ensemble voting
                 self.state.lang_id_predictions.append((top_lan, prob))
-                logger.debug(f"Language prediction {len(self.state.lang_id_predictions)}/{self.cfg.lang_id_ensemble_chunks}: {top_lan} p={prob:.4f}")
+                logger.info(f"[LangID] Prediction {len(self.state.lang_id_predictions)}/{self.cfg.lang_id_ensemble_chunks}: {top_lan} p={prob:.4f}")
 
                 # Check if we have enough chunks for decision
                 if len(self.state.lang_id_predictions) >= self.cfg.lang_id_ensemble_chunks:
-                    final_lang, final_prob = self._ensemble_language_vote()
+                    final_lang, final_prob, votes, weighted_scores, consistency = self._ensemble_language_vote()
 
                     # Get threshold (dynamic or static)
                     threshold = self._get_dynamic_threshold() if self.cfg.lang_id_dynamic_threshold else self.cfg.lang_id_confidence_threshold
 
-                    if final_prob >= threshold:
-                        self._apply_detected_language(final_lang, final_prob)
-                    else:
-                        # Fallback if confidence is too low
+                    # Check consistency (minimum consensus ratio)
+                    min_consensus = self.cfg.lang_id_min_consensus_ratio
+
+                    if final_prob >= threshold and consistency >= min_consensus:
+                        # Good confidence and consistency - accept
+                        self._apply_detected_language(final_lang, final_prob,
+                            reason=f"[confidence={final_prob:.4f}>={threshold:.4f}, consistency={consistency:.0%}>={min_consensus:.0%}]")
+                    elif consistency < min_consensus:
+                        # Low consistency - continue accumulating or use fallback
+                        logger.warning(f"[LangID] Low consistency {consistency:.0%} < {min_consensus:.0%}, candidates disagree")
                         if self.cfg.lang_id_fallback_lang != "auto":
-                            logger.warning(f"Low confidence {final_prob:.4f} < {threshold:.4f}, using fallback: {self.cfg.lang_id_fallback_lang}")
-                            self._apply_detected_language(self.cfg.lang_id_fallback_lang, final_prob)
+                            self._apply_detected_language(self.cfg.lang_id_fallback_lang, final_prob,
+                                reason=f"[FALLBACK: low consistency={consistency:.0%}]")
                         else:
-                            # Continue accumulating if fallback is "auto"
-                            logger.warning(f"Low confidence {final_prob:.4f} < {threshold:.4f}, continuing to accumulate")
+                            logger.info(f"[LangID] Continuing to accumulate more predictions...")
+                    elif final_prob < threshold:
+                        # Low confidence - use fallback or continue
+                        logger.warning(f"[LangID] Low confidence {final_prob:.4f} < {threshold:.4f}")
+                        if self.cfg.lang_id_fallback_lang != "auto":
+                            self._apply_detected_language(self.cfg.lang_id_fallback_lang, final_prob,
+                                reason=f"[FALLBACK: low confidence={final_prob:.4f}]")
+                        else:
+                            logger.info(f"[LangID] Continuing to accumulate more predictions...")
 
         self.trim_context()
         current_tokens = self._current_tokens()
