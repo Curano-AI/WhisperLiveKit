@@ -532,9 +532,10 @@ class AlignAtt:
         end_encode = time()
         # print('Encoder duration:', end_encode-beg_encode)
                 
-        if self.cfg.language == "auto" and self.state.detected_language is None and self.state.first_timestamp:
-            seconds_since_start = self.segments_len() - self.state.first_timestamp
-            if seconds_since_start >= 2.0:
+        # Language detection for auto mode (before transcription)
+        if self.cfg.language == "auto" and self.state.detected_language is None:
+            audio_duration = self.segments_len()
+            if audio_duration >= 2.0:
                 language_tokens, language_probs = self.lang_id(encoder_feature)
                 top_lan, prob = max(language_probs[0].items(), key=lambda x: x[1])
 
@@ -572,6 +573,11 @@ class AlignAtt:
                                 reason=f"[FALLBACK: low confidence={final_prob:.4f}]")
                         else:
                             logger.info(f"[LangID] Continuing to accumulate more predictions...")
+
+        # Skip transcription until language is detected (buffer audio only)
+        if self.cfg.language == "auto" and self.state.detected_language is None:
+            logger.info(f"[LangID] Buffering audio ({self.segments_len():.1f}s), waiting for language detection...")
+            return []
 
         self.trim_context()
         current_tokens = self._current_tokens()
