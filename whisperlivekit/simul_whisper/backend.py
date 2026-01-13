@@ -259,7 +259,7 @@ class SimulStreamingASR:
             self.mlx_encoder = load_mlx_encoder(path_or_hf_repo=mlx_model_path)
             self.shared_model = self.load_model()
         elif self.encoder_backend == "faster-whisper":
-            print('SimulStreaming will use Faster Whisper for the encoder.')
+            logger.info('SimulStreaming will use Faster Whisper for the encoder.')
             if self._resolved_model_path is not None:
                 fw_model = str(self._resolved_model_path)
             else:

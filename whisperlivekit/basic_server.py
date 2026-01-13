@@ -2,18 +2,17 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-# Configure logging BEFORE importing whisperlivekit modules (they also call basicConfig)
+# Configure logging BEFORE importing whisperlivekit modules
 logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    force=True  # Override any existing configuration
+    level=logging.INFO,
+    format="%(levelname)s:%(name)s:%(message)s"
 )
 
 # Suppress noisy external modules
-logging.getLogger("uvicorn").setLevel(logging.WARNING)
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
+for _lib in ["uvicorn", "uvicorn.access", "httpx", "httpcore",
+             "numba", "numpy", "torch", "transformers",
+             "faster_whisper", "ctranslate2", "huggingface_hub"]:
+    logging.getLogger(_lib).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
