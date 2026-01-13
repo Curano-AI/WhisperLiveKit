@@ -390,10 +390,10 @@ class AlignAtt:
         weighted_scores: dict = {}
         prob_sums: dict = {}
 
-        # Log all predictions
-        logger.info(f"[LangID] Ensemble voting over {len(self.state.lang_id_predictions)} predictions:")
+        # Log all predictions (using print because uvicorn blocks logger)
+        print(f"[LangID] Ensemble voting over {len(self.state.lang_id_predictions)} predictions:")
         for i, (lang, prob) in enumerate(self.state.lang_id_predictions):
-            logger.info(f"  [{i+1}] {lang}: {prob:.4f}")
+            print(f"  [{i+1}] {lang}: {prob:.4f}")
             weight = prob ** 2.0  # Quadratic weighting
             votes[lang] = votes.get(lang, 0) + 1
             weighted_scores[lang] = weighted_scores.get(lang, 0) + weight
@@ -401,12 +401,12 @@ class AlignAtt:
             counts[lang] = counts.get(lang, 0) + 1
 
         if not votes:
-            logger.warning("[LangID] No predictions to vote on")
+            print("[LangID] WARNING: No predictions to vote on")
             return None, 0.0, {}, {}, 0.0
 
         # Log voting results
-        logger.info(f"[LangID] Vote counts: {votes}")
-        logger.info(f"[LangID] Weighted scores: {{{', '.join(f'{k}: {v:.4f}' for k, v in weighted_scores.items())}}}")
+        print(f"[LangID] Vote counts: {votes}")
+        print(f"[LangID] Weighted scores: {{{', '.join(f'{k}: {v:.4f}' for k, v in weighted_scores.items())}}}")
 
         # Select best language by weighted score
         best_lang = max(weighted_scores, key=weighted_scores.get)
@@ -416,8 +416,8 @@ class AlignAtt:
         total_votes = sum(votes.values())
         consistency_score = votes[best_lang] / total_votes if total_votes > 0 else 0.0
 
-        logger.info(f"[LangID] Best candidate: {best_lang} (votes={votes[best_lang]}/{total_votes}, "
-                   f"mean_prob={mean_prob:.4f}, consistency={consistency_score:.2%})")
+        print(f"[LangID] Best candidate: {best_lang} (votes={votes[best_lang]}/{total_votes}, "
+              f"mean_prob={mean_prob:.4f}, consistency={consistency_score:.2%})")
 
         return best_lang, mean_prob, votes, weighted_scores, consistency_score
 
@@ -436,21 +436,21 @@ class AlignAtt:
         if variance > 0.4:
             sorted_probs = sorted(probs)
             threshold = max(0.3, sorted_probs[len(sorted_probs) // 4])
-            logger.info(f"[LangID] Dynamic threshold: {threshold:.4f} (high variance={variance:.4f}, using p25)")
+            print(f"[LangID] Dynamic threshold: {threshold:.4f} (high variance={variance:.4f}, using p25)")
             return threshold
 
         # Low confidence -> more liberal
         if mean_prob < 0.5:
             threshold = self.cfg.lang_id_confidence_threshold * 0.7
-            logger.info(f"[LangID] Dynamic threshold: {threshold:.4f} (low mean={mean_prob:.4f}, using 0.7x base)")
+            print(f"[LangID] Dynamic threshold: {threshold:.4f} (low mean={mean_prob:.4f}, using 0.7x base)")
             return threshold
 
-        logger.info(f"[LangID] Dynamic threshold: {self.cfg.lang_id_confidence_threshold:.4f} (using base threshold)")
+        print(f"[LangID] Dynamic threshold: {self.cfg.lang_id_confidence_threshold:.4f} (using base threshold)")
         return self.cfg.lang_id_confidence_threshold
 
     def _apply_detected_language(self, lang: str, prob: float, reason: str = ""):
         """Apply the detected language."""
-        logger.info(f"[LangID] === DECISION: {lang} (confidence={prob:.4f}) {reason} ===")
+        print(f"[LangID] === DECISION: {lang} (confidence={prob:.4f}) {reason} ===")
         print(f"Detected language: {lang} with p={prob:.4f}")
         self.create_tokenizer(lang)
         self.state.last_attend_frame = -self.cfg.rewind_threshold
@@ -459,7 +459,7 @@ class AlignAtt:
         self.init_context()
         self.state.detected_language = lang
         self.state.lang_id_predictions.clear()
-        logger.info(f"[LangID] Tokenizer configured: language={self.tokenizer.language}")
+        print(f"[LangID] Tokenizer configured: language={self.tokenizer.language}")
 
     ### transcription / translation
 
@@ -541,7 +541,7 @@ class AlignAtt:
 
                 # Accumulate predictions for ensemble voting
                 self.state.lang_id_predictions.append((top_lan, prob))
-                logger.info(f"[LangID] Prediction {len(self.state.lang_id_predictions)}/{self.cfg.lang_id_ensemble_chunks}: {top_lan} p={prob:.4f}")
+                print(f"[LangID] Prediction {len(self.state.lang_id_predictions)}/{self.cfg.lang_id_ensemble_chunks}: {top_lan} p={prob:.4f}")
 
                 # Check if we have enough chunks for decision
                 if len(self.state.lang_id_predictions) >= self.cfg.lang_id_ensemble_chunks:
@@ -559,24 +559,24 @@ class AlignAtt:
                             reason=f"[confidence={final_prob:.4f}>={threshold:.4f}, consistency={consistency:.0%}>={min_consensus:.0%}]")
                     elif consistency < min_consensus:
                         # Low consistency - continue accumulating or use fallback
-                        logger.warning(f"[LangID] Low consistency {consistency:.0%} < {min_consensus:.0%}, candidates disagree")
+                        print(f"[LangID] WARNING: Low consistency {consistency:.0%} < {min_consensus:.0%}, candidates disagree")
                         if self.cfg.lang_id_fallback_lang != "auto":
                             self._apply_detected_language(self.cfg.lang_id_fallback_lang, final_prob,
                                 reason=f"[FALLBACK: low consistency={consistency:.0%}]")
                         else:
-                            logger.info(f"[LangID] Continuing to accumulate more predictions...")
+                            print(f"[LangID] Continuing to accumulate more predictions...")
                     elif final_prob < threshold:
                         # Low confidence - use fallback or continue
-                        logger.warning(f"[LangID] Low confidence {final_prob:.4f} < {threshold:.4f}")
+                        print(f"[LangID] WARNING: Low confidence {final_prob:.4f} < {threshold:.4f}")
                         if self.cfg.lang_id_fallback_lang != "auto":
                             self._apply_detected_language(self.cfg.lang_id_fallback_lang, final_prob,
                                 reason=f"[FALLBACK: low confidence={final_prob:.4f}]")
                         else:
-                            logger.info(f"[LangID] Continuing to accumulate more predictions...")
+                            print(f"[LangID] Continuing to accumulate more predictions...")
 
         # Skip transcription until language is detected (buffer audio only)
         if self.cfg.language == "auto" and self.state.detected_language is None:
-            logger.info(f"[LangID] Buffering audio ({self.segments_len():.1f}s), waiting for language detection...")
+            print(f"[LangID] Buffering audio ({self.segments_len():.1f}s), waiting for language detection...")
             return []
 
         self.trim_context()
