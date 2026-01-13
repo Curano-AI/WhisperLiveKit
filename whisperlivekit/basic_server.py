@@ -2,23 +2,27 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+# Configure logging BEFORE importing whisperlivekit modules (they also call basicConfig)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True  # Override any existing configuration
+)
+
+# Suppress noisy external modules
+logging.getLogger("uvicorn").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from whisperlivekit import (AudioProcessor, TranscriptionEngine,
                             get_inline_ui_html, parse_args)
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-# Enable DEBUG logs for our modules
-logging.getLogger("whisperlivekit").setLevel(logging.DEBUG)
-
-# Suppress noisy external modules
-logging.getLogger("uvicorn").setLevel(logging.WARNING)
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
 
 args = parse_args()
 transcription_engine = None
