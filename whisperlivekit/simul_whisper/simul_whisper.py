@@ -27,7 +27,6 @@ from .token_buffer import TokenBuffer
 
 DEC_PAD = 50257
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 if mlx_backend_available():
     from mlx_whisper.audio import \

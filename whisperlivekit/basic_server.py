@@ -9,10 +9,16 @@ from fastapi.responses import HTMLResponse
 from whisperlivekit import (AudioProcessor, TranscriptionEngine,
                             get_inline_ui_html, parse_args)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logging.getLogger().setLevel(logging.WARNING)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+# Enable DEBUG logs for our modules
+logging.getLogger("whisperlivekit").setLevel(logging.DEBUG)
+
+# Suppress noisy external modules
+logging.getLogger("uvicorn").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 args = parse_args()
 transcription_engine = None
