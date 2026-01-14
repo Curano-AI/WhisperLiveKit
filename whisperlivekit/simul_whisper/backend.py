@@ -208,7 +208,7 @@ class SimulStreamingASR:
                 self.use_full_mlx = True
                     
         self.cfg = AlignAttConfig(
-                tokenizer_is_multilingual= is_multilingual,
+                tokenizer_is_multilingual=is_multilingual,
                 segment_length=self.min_chunk_size,
                 frame_threshold=self.frame_threshold,
                 language=self.lan,
@@ -222,6 +222,23 @@ class SimulStreamingASR:
                 init_prompt=self.init_prompt,
                 max_context_tokens=self.max_context_tokens,
                 static_init_prompt=self.static_init_prompt,
+                # Language detection parameters
+                lang_id_confidence_threshold=getattr(self, 'lang_id_confidence_threshold', 0.5),
+                lang_id_ensemble_chunks=getattr(self, 'lang_id_ensemble_chunks', 3),
+                lang_id_dynamic_threshold=getattr(self, 'lang_id_dynamic_threshold', True),
+                lang_id_fallback_lang=getattr(self, 'lang_id_fallback_lang', 'en'),
+                lang_id_min_consensus_ratio=getattr(self, 'lang_id_min_consensus_ratio', 0.5),
+                lang_id_min_gap_threshold=getattr(self, 'lang_id_min_gap_threshold', 0.05),
+                lang_id_ambiguity_threshold=getattr(self, 'lang_id_ambiguity_threshold', 0.10),
+                lang_id_use_soft_voting=getattr(self, 'lang_id_use_soft_voting', True),
+                # Progressive Detection parameters
+                lang_id_progressive_enabled=getattr(self, 'lang_id_progressive_enabled', True),
+                lang_id_chunk_duration=getattr(self, 'lang_id_chunk_duration', 2.5),
+                lang_id_stage1_time=getattr(self, 'lang_id_stage1_time', 5.0),
+                lang_id_stage1_confidence=getattr(self, 'lang_id_stage1_confidence', 0.9),
+                lang_id_stage2_time=getattr(self, 'lang_id_stage2_time', 10.0),
+                lang_id_stage2_gap=getattr(self, 'lang_id_stage2_gap', 0.15),
+                lang_id_stage3_time=getattr(self, 'lang_id_stage3_time', 15.0),
         )  
         
         # Set up tokenizer for translation if needed

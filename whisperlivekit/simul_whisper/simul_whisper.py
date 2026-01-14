@@ -23,7 +23,12 @@ from .beam import BeamPyTorchInference
 from .config import AlignAttConfig
 from .decoder_state import DecoderState
 from .eow_detection import fire_at_boundary, load_cif
-from .lang_detection import SoftVotingAggregator, LangDecisionResult, LangDecisionReason
+from .lang_detection import (
+    SoftVotingAggregator,
+    LangDecisionResult,
+    LangDecisionReason,
+    ProgressiveDetectionController,
+)
 from .token_buffer import TokenBuffer
 
 DEC_PAD = 50257
@@ -180,10 +185,23 @@ class AlignAtt:
             self.state.inference = BeamPyTorchInference(self.model, self.state.initial_token_length)
             self.state.inference.kv_cache = self.state.kv_cache
             self.state.token_decoder = BeamSearchDecoder(
-                inference=self.state.inference, 
-                eot=self.tokenizer.eot, 
+                inference=self.state.inference,
+                eot=self.tokenizer.eot,
                 beam_size=cfg.beam_size
             )
+
+        # Progressive Detection Controller
+        if cfg.lang_id_progressive_enabled:
+            self.progressive_controller = ProgressiveDetectionController(
+                stage1_time=cfg.lang_id_stage1_time,
+                stage1_confidence=cfg.lang_id_stage1_confidence,
+                stage2_time=cfg.lang_id_stage2_time,
+                stage2_gap=cfg.lang_id_stage2_gap,
+                stage3_time=cfg.lang_id_stage3_time,
+                chunk_duration=cfg.lang_id_chunk_duration,
+            )
+        else:
+            self.progressive_controller = None
 
     def warmup(self, audio):
         try:
@@ -520,7 +538,105 @@ class AlignAtt:
         self.init_context()
         self.state.detected_language = lang
         self.state.lang_id_predictions.clear()
+        # Reset progressive detection state
+        self.state.lang_id_detection_start_time = None
+        self.state.lang_id_current_stage = 0
+        self.state.lang_id_last_check_time = 0.0
         logger.info(f"[LangID] Tokenizer configured: language={self.tokenizer.language}")
+
+    def _progressive_language_detection(
+        self,
+        encoder_features: torch.Tensor,
+        audio_duration: float
+    ) -> Optional[str]:
+        """
+        Progressive language detection with checkpoints.
+
+        Returns detected language code if decision made, None otherwise.
+        """
+        # Initialize detection start time
+        if self.state.lang_id_detection_start_time is None:
+            self.state.lang_id_detection_start_time = audio_duration
+            self.state.lang_id_current_stage = 0
+            logger.info(f"[LangID Progressive] Started detection at {audio_duration:.1f}s")
+
+        elapsed_time = audio_duration - self.state.lang_id_detection_start_time
+
+        # Calculate minimum interval between predictions (chunk_duration)
+        min_interval = self.cfg.lang_id_chunk_duration
+        time_since_last = audio_duration - self.state.lang_id_last_check_time
+
+        # Only make prediction if enough time has passed
+        if time_since_last < min_interval and self.state.lang_id_predictions:
+            return None
+
+        # Make new prediction
+        language_tokens, language_probs = self.lang_id(encoder_features)
+        top_lang, prob = max(language_probs[0].items(), key=lambda x: x[1])
+
+        self.state.lang_id_predictions.append((top_lang, prob))
+        self.state.lang_id_last_check_time = audio_duration
+
+        logger.info(
+            f"[LangID Progressive] Prediction #{len(self.state.lang_id_predictions)}: "
+            f"{top_lang} p={prob:.4f} (elapsed={elapsed_time:.1f}s, stage={self.state.lang_id_current_stage})"
+        )
+
+        # Aggregate current predictions
+        result = self._ensemble_language_vote()
+
+        # Check if progressive detection is enabled
+        if not self.cfg.lang_id_progressive_enabled or self.progressive_controller is None:
+            # Legacy mode: fixed number of chunks
+            if len(self.state.lang_id_predictions) >= self.cfg.lang_id_ensemble_chunks:
+                return self._finalize_language_decision(result, "LEGACY_ENSEMBLE")
+            return None
+
+        # Progressive mode: check checkpoints
+        stage_result = self.progressive_controller.check_stage(
+            elapsed_time=elapsed_time,
+            result=result,
+            current_stage=self.state.lang_id_current_stage,
+        )
+
+        logger.info(f"[LangID Progressive] Stage check: {stage_result.reason}")
+
+        if stage_result.should_accept:
+            return self._finalize_language_decision(
+                stage_result.result,
+                stage_result.reason
+            )
+
+        # Update stage if we passed a checkpoint without accepting
+        if stage_result.stage > self.state.lang_id_current_stage:
+            self.state.lang_id_current_stage = stage_result.stage
+
+        return None
+
+    def _finalize_language_decision(
+        self,
+        result: LangDecisionResult,
+        reason: str
+    ) -> str:
+        """Finalize language decision and apply detected language."""
+        # Handle ambiguous/fallback cases
+        if result.reason == LangDecisionReason.AMBIGUOUS:
+            if self.cfg.lang_id_fallback_lang != "auto":
+                lang = self.cfg.lang_id_fallback_lang
+                reason = f"{reason} -> FALLBACK (ambiguous)"
+            else:
+                lang = result.selected_lang
+        elif result.confidence < self.cfg.lang_id_confidence_threshold:
+            if self.cfg.lang_id_fallback_lang != "auto":
+                lang = self.cfg.lang_id_fallback_lang
+                reason = f"{reason} -> FALLBACK (low confidence)"
+            else:
+                lang = result.selected_lang
+        else:
+            lang = result.selected_lang
+
+        self._apply_detected_language(lang, result.confidence, reason)
+        return lang
 
     ### transcription / translation
 
@@ -596,60 +712,17 @@ class AlignAtt:
         # Language detection for auto mode (before transcription)
         if self.cfg.language == "auto" and self.state.detected_language is None:
             audio_duration = self.segments_len()
-            if audio_duration >= 2.0:
-                language_tokens, language_probs = self.lang_id(encoder_feature)
-                top_lan, prob = max(language_probs[0].items(), key=lambda x: x[1])
+            # Minimum audio required before first detection attempt
+            min_audio_for_detection = max(2.0, self.cfg.lang_id_chunk_duration)
 
-                # Accumulate predictions for ensemble voting
-                self.state.lang_id_predictions.append((top_lan, prob))
-                logger.info(f"[LangID] Prediction {len(self.state.lang_id_predictions)}/{self.cfg.lang_id_ensemble_chunks}: {top_lan} p={prob:.4f}")
+            if audio_duration >= min_audio_for_detection:
+                detected_lang = self._progressive_language_detection(
+                    encoder_features=encoder_feature,
+                    audio_duration=audio_duration,
+                )
 
-                # Check if we have enough chunks for decision
-                if len(self.state.lang_id_predictions) >= self.cfg.lang_id_ensemble_chunks:
-                    result = self._ensemble_language_vote()
-
-                    # Get threshold (dynamic or static)
-                    threshold = self._get_dynamic_threshold() if self.cfg.lang_id_dynamic_threshold else self.cfg.lang_id_confidence_threshold
-
-                    # Check consistency (minimum consensus ratio)
-                    min_consensus = self.cfg.lang_id_min_consensus_ratio
-
-                    # Handle AMBIGUOUS case first (new soft voting feature)
-                    if result.reason == LangDecisionReason.AMBIGUOUS:
-                        logger.warning(f"[LangID] AMBIGUOUS: gap={result.gap_to_runner_up:.2%} < {self.cfg.lang_id_min_gap_threshold:.2%}")
-                        if self.cfg.lang_id_fallback_lang != "auto":
-                            self._apply_detected_language(
-                                self.cfg.lang_id_fallback_lang, result.confidence,
-                                reason=f"[AMBIGUOUS: gap={result.gap_to_runner_up:.2%}]"
-                            )
-                        else:
-                            logger.info(f"[LangID] Continuing to accumulate more predictions...")
-                    elif result.confidence >= threshold and result.consistency_score >= min_consensus:
-                        # Good confidence and consistency - accept
-                        self._apply_detected_language(
-                            result.selected_lang, result.confidence,
-                            reason=f"[{result.reason.value}: confidence={result.confidence:.4f}, gap={result.gap_to_runner_up:.2%}]"
-                        )
-                    elif result.consistency_score < min_consensus:
-                        # Low consistency - continue accumulating or use fallback
-                        logger.warning(f"[LangID] Low consistency {result.consistency_score:.0%} < {min_consensus:.0%}, candidates disagree")
-                        if self.cfg.lang_id_fallback_lang != "auto":
-                            self._apply_detected_language(
-                                self.cfg.lang_id_fallback_lang, result.confidence,
-                                reason=f"[FALLBACK: low consistency={result.consistency_score:.0%}]"
-                            )
-                        else:
-                            logger.info(f"[LangID] Continuing to accumulate more predictions...")
-                    elif result.confidence < threshold:
-                        # Low confidence - use fallback or continue
-                        logger.warning(f"[LangID] Low confidence {result.confidence:.4f} < {threshold:.4f}")
-                        if self.cfg.lang_id_fallback_lang != "auto":
-                            self._apply_detected_language(
-                                self.cfg.lang_id_fallback_lang, result.confidence,
-                                reason=f"[FALLBACK: low confidence={result.confidence:.4f}]"
-                            )
-                        else:
-                            logger.info(f"[LangID] Continuing to accumulate more predictions...")
+                if detected_lang is not None:
+                    logger.info(f"[LangID] Language detected: {detected_lang}")
 
         # Skip transcription until language is detected (buffer audio only)
         if self.cfg.language == "auto" and self.state.detected_language is None:

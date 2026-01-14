@@ -358,6 +358,70 @@ def parse_args():
         help="Minimum ratio of chunks that must agree on the language. Default: 0.5 (50%%).",
     )
 
+    # Progressive Detection arguments
+    simulstreaming_group.add_argument(
+        "--lang-id-progressive",
+        action="store_true",
+        default=True,
+        dest="lang_id_progressive_enabled",
+        help="Enable progressive language detection with checkpoints. Default: enabled.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--no-lang-id-progressive",
+        action="store_false",
+        dest="lang_id_progressive_enabled",
+        help="Disable progressive detection (use fixed chunk count instead).",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-chunk-duration",
+        type=float,
+        default=2.5,
+        dest="lang_id_chunk_duration",
+        help="Duration of each language detection chunk in seconds. Default: 2.5.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-stage1-time",
+        type=float,
+        default=5.0,
+        dest="lang_id_stage1_time",
+        help="Time for Stage 1 checkpoint (high confidence check). Default: 5.0.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-stage1-confidence",
+        type=float,
+        default=0.9,
+        dest="lang_id_stage1_confidence",
+        help="Confidence threshold for Stage 1 early exit. Default: 0.9.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-stage2-time",
+        type=float,
+        default=10.0,
+        dest="lang_id_stage2_time",
+        help="Time for Stage 2 checkpoint (gap analysis). Default: 10.0.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-stage2-gap",
+        type=float,
+        default=0.15,
+        dest="lang_id_stage2_gap",
+        help="Minimum gap for Stage 2 acceptance. Default: 0.15.",
+    )
+
+    simulstreaming_group.add_argument(
+        "--lang-id-stage3-time",
+        type=float,
+        default=15.0,
+        dest="lang_id_stage3_time",
+        help="Time for Stage 3 (forced decision). Default: 15.0.",
+    )
+
     args = parser.parse_args()
     
     args.transcription = not args.no_transcription

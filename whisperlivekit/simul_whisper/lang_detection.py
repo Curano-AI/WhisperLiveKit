@@ -233,3 +233,117 @@ class SoftVotingAggregator:
                 f"[LangID] {marker} {c.lang}: votes={c.raw_votes}, "
                 f"score={c.weighted_score:.4f}, mean_prob={c.mean_prob:.4f} {runner_up_marker}"
             )
+
+
+@dataclass
+class ProgressiveStageResult:
+    """Result of a progressive detection stage check."""
+    stage: int
+    should_accept: bool
+    reason: str
+    result: Optional[LangDecisionResult] = None
+
+
+class ProgressiveDetectionController:
+    """
+    Controller for progressive language detection with checkpoints.
+
+    Checkpoints:
+    - Stage 1 (5s):  Accept if confidence >= 0.9
+    - Stage 2 (10s): Accept if gap >= 0.15
+    - Stage 3 (15s): Accept best result (forced decision)
+
+    This approach balances speed and accuracy:
+    - Fast detection for "easy" cases (clear language with high confidence)
+    - More time for ambiguous cases (similar languages like nl/de)
+    """
+
+    def __init__(
+        self,
+        stage1_time: float = 5.0,
+        stage1_confidence: float = 0.9,
+        stage2_time: float = 10.0,
+        stage2_gap: float = 0.15,
+        stage3_time: float = 15.0,
+        chunk_duration: float = 2.5,
+    ):
+        """
+        Initialize the controller.
+
+        Args:
+            stage1_time: Time for Stage 1 checkpoint (seconds)
+            stage1_confidence: Confidence threshold for Stage 1 early exit
+            stage2_time: Time for Stage 2 checkpoint (seconds)
+            stage2_gap: Gap threshold for Stage 2 acceptance
+            stage3_time: Time for Stage 3 forced decision (seconds)
+            chunk_duration: Duration of each detection chunk (seconds)
+        """
+        self.stage1_time = stage1_time
+        self.stage1_confidence = stage1_confidence
+        self.stage2_time = stage2_time
+        self.stage2_gap = stage2_gap
+        self.stage3_time = stage3_time
+        self.chunk_duration = chunk_duration
+
+    def check_stage(
+        self,
+        elapsed_time: float,
+        result: LangDecisionResult,
+        current_stage: int,
+    ) -> ProgressiveStageResult:
+        """
+        Check if current stage conditions are met for early exit.
+
+        Args:
+            elapsed_time: Time since detection started (seconds)
+            result: Current aggregation result from SoftVotingAggregator
+            current_stage: Current stage number (0, 1, 2)
+
+        Returns:
+            ProgressiveStageResult with decision
+        """
+        # Stage 1: High confidence early exit
+        if current_stage == 0 and elapsed_time >= self.stage1_time:
+            if result.confidence >= self.stage1_confidence:
+                return ProgressiveStageResult(
+                    stage=1,
+                    should_accept=True,
+                    reason=f"STAGE1_HIGH_CONFIDENCE: {result.confidence:.2%} >= {self.stage1_confidence:.2%}",
+                    result=result,
+                )
+            return ProgressiveStageResult(
+                stage=1,
+                should_accept=False,
+                reason=f"STAGE1_LOW_CONFIDENCE: {result.confidence:.2%} < {self.stage1_confidence:.2%}",
+            )
+
+        # Stage 2: Gap-based decision
+        if current_stage == 1 and elapsed_time >= self.stage2_time:
+            if result.gap_to_runner_up >= self.stage2_gap:
+                return ProgressiveStageResult(
+                    stage=2,
+                    should_accept=True,
+                    reason=f"STAGE2_CLEAR_GAP: {result.gap_to_runner_up:.2%} >= {self.stage2_gap:.2%}",
+                    result=result,
+                )
+            return ProgressiveStageResult(
+                stage=2,
+                should_accept=False,
+                reason=f"STAGE2_SMALL_GAP: {result.gap_to_runner_up:.2%} < {self.stage2_gap:.2%}",
+            )
+
+        # Stage 3: Forced decision (always accept)
+        if elapsed_time >= self.stage3_time:
+            return ProgressiveStageResult(
+                stage=3,
+                should_accept=True,
+                reason=f"STAGE3_FORCED_DECISION: max time {self.stage3_time}s reached",
+                result=result,
+            )
+
+        # Not at checkpoint yet
+        return ProgressiveStageResult(
+            stage=current_stage,
+            should_accept=False,
+            reason=f"WAITING: {elapsed_time:.1f}s < next checkpoint",
+        )

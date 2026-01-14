@@ -13,7 +13,11 @@ class DecoderState:
     reset_tokenizer_to_auto_next_call: bool = False
     lang_id_predictions: List[Tuple[str, float]] = field(default_factory=list)
     lang_decision_result: Optional[Any] = None  # LangDecisionResult from lang_detection.py
-    
+    # Progressive Detection state
+    lang_id_detection_start_time: Optional[float] = None  # Audio duration when detection started
+    lang_id_current_stage: int = 0                        # Current stage (0, 1, 2)
+    lang_id_last_check_time: float = 0.0                  # Last time a prediction was made
+
     tokens: List[torch.Tensor] = field(default_factory=list)
     initial_tokens: Optional[torch.Tensor] = None
     initial_token_length: int = 0

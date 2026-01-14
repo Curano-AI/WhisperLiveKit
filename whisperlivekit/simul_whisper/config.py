@@ -31,3 +31,11 @@ class AlignAttConfig:
     lang_id_min_gap_threshold: float = 0.05      # Minimum 5% gap required
     lang_id_ambiguity_threshold: float = 0.10   # Mark as ambiguous if gap < 10%
     lang_id_use_soft_voting: bool = True        # Use new soft voting algorithm
+    # Progressive Detection parameters
+    lang_id_progressive_enabled: bool = True    # Enable progressive detection with checkpoints
+    lang_id_chunk_duration: float = 2.5         # Duration of each detection chunk in seconds
+    lang_id_stage1_time: float = 5.0            # Time for Stage 1 checkpoint (seconds)
+    lang_id_stage1_confidence: float = 0.9      # Confidence threshold for Stage 1 early exit
+    lang_id_stage2_time: float = 10.0           # Time for Stage 2 checkpoint (seconds)
+    lang_id_stage2_gap: float = 0.15            # Gap threshold for Stage 2 acceptance
+    lang_id_stage3_time: float = 15.0           # Time for Stage 3 forced decision (seconds)
