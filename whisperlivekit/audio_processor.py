@@ -68,7 +68,7 @@ class AudioProcessor:
         self.bytes_per_sample = 2
         self.bytes_per_sec = self.samples_per_sec * self.bytes_per_sample
         self.max_bytes_per_sec = 32000 * 5  # 5 seconds of audio at 32 kHz
-        self.is_pcm_input = self.args.pcm_input
+        self.is_pcm_input = kwargs.get('pcm_input', self.args.pcm_input)
 
         # State management
         self.is_stopping: bool = False

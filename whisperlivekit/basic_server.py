@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import os
+import secrets
 from contextlib import asynccontextmanager
+from typing import Literal, Optional
 
 # Configure logging BEFORE importing whisperlivekit modules
 logging.basicConfig(
@@ -16,7 +19,7 @@ for _lib in ["uvicorn", "uvicorn.access", "httpx", "httpcore",
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, WebSocketException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -25,6 +28,40 @@ from whisperlivekit import (AudioProcessor, TranscriptionEngine,
 
 args = parse_args()
 transcription_engine = None
+
+ASR_API_KEY_ENV = "ASR_API_KEY"
+
+
+async def validate_api_key(
+    websocket: WebSocket,
+    api_key: Optional[str] = Query(default=None),
+) -> str:
+    """Validate API key from query parameter against env variable."""
+    expected_key = os.environ.get(ASR_API_KEY_ENV)
+
+    if expected_key is None:
+        logger.error(f"{ASR_API_KEY_ENV} env var not set")
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Server authentication not configured"
+        )
+
+    if api_key is None:
+        logger.warning("WebSocket rejected: missing api_key")
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="API key is required"
+        )
+
+    if not secrets.compare_digest(api_key, expected_key):
+        logger.warning("WebSocket rejected: invalid api_key")
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Invalid API key"
+        )
+
+    return api_key
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):    
@@ -63,16 +100,24 @@ async def handle_websocket_results(websocket, results_generator):
 
 
 @app.websocket("/asr")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    audio_format: Literal["webm_opus", "pcm"] = Query(default="webm_opus"),
+    api_key: str = Depends(validate_api_key),
+):
     global transcription_engine
+
+    pcm_input = (audio_format == "pcm")
+
     audio_processor = AudioProcessor(
         transcription_engine=transcription_engine,
+        pcm_input=pcm_input,
     )
     await websocket.accept()
-    logger.info("WebSocket connection opened.")
+    logger.info(f"WebSocket connection opened. audio_format={audio_format}")
 
     try:
-        await websocket.send_json({"type": "config", "useAudioWorklet": bool(args.pcm_input)})
+        await websocket.send_json({"type": "config", "useAudioWorklet": pcm_input})
     except Exception as e:
         logger.warning(f"Failed to send config to client: {e}")
             

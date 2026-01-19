@@ -45,6 +45,7 @@ const linesTranscriptDiv = document.getElementById("linesTranscript");
 const timerElement = document.querySelector(".timer");
 const themeRadios = document.querySelectorAll('input[name="theme"]');
 const microphoneSelect = document.getElementById("microphoneSelect");
+const apiKeyInput = document.getElementById("apiKeyInput");
 
 const settingsToggle = document.getElementById("settingsToggle");
 const settingsDiv = document.querySelector(".settings");
@@ -269,10 +270,27 @@ websocketInput.addEventListener("change", () => {
   statusText.textContent = "WebSocket URL updated. Ready to connect.";
 });
 
+// API key handling
+let apiKey = localStorage.getItem("apiKey") || "";
+if (apiKeyInput) {
+  apiKeyInput.value = apiKey;
+  apiKeyInput.addEventListener("change", () => {
+    apiKey = apiKeyInput.value.trim();
+    localStorage.setItem("apiKey", apiKey);
+    statusText.textContent = apiKey ? "API key saved." : "API key cleared.";
+  });
+}
+
 function setupWebSocket() {
   return new Promise((resolve, reject) => {
     try {
-      websocket = new WebSocket(websocketUrl);
+      // Build WebSocket URL with api_key query parameter
+      let wsUrl = websocketUrl;
+      if (apiKey) {
+        const separator = wsUrl.includes("?") ? "&" : "?";
+        wsUrl = `${wsUrl}${separator}api_key=${encodeURIComponent(apiKey)}`;
+      }
+      websocket = new WebSocket(wsUrl);
     } catch (error) {
       statusText.textContent = "Invalid WebSocket URL. Please check and try again.";
       reject(error);
